@@ -218,7 +218,7 @@ tbl_title_background_palette:		; was: tbl_C395_background_palette
     .byte $0F, $26, $20, $27
     .byte $0F, $06, $0F, $26
     .byte $0F, $06, $20, $26
-.ifdef PACMAN_REVISION_TENGEN
+.ifdef PACMAN_REVISION_RAM_PALETTES
     .byte $0F, $27, $20, $06
     .byte $0F, $11, $20, $33
     .byte $0F, $20, $20, $21
