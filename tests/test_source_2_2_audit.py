@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from source_2_1_audit import (  # noqa: E402
+from source_2_2_audit import (  # noqa: E402
     EXPECTED_RELEASE_LINE,
     EXPECTED_PREDECESSOR,
     EXPECTED_RELEASE,
@@ -18,6 +18,7 @@ from source_2_1_audit import (  # noqa: E402
     validate_delta_evidence,
     validate_layout,
     validate_release_metadata,
+    validate_source_layout,
 )
 
 
@@ -41,7 +42,7 @@ def release_manifest() -> dict[str, object]:
     }
 
 
-class Source21AuditTests(unittest.TestCase):
+class Source22AuditTests(unittest.TestCase):
     def test_release_metadata_accepts_exact_semantic_contract(self) -> None:
         self.assertEqual(validate_release_metadata(release_manifest()), [])
 
@@ -63,8 +64,17 @@ class Source21AuditTests(unittest.TestCase):
         self.assertTrue(any("missing release-delta evidence" in error for error in errors))
 
     def test_make_target_parser_ignores_recipe_lines(self) -> None:
-        text = "verify: build\n\tpython tool.py\nsource-2-1-audit:\n"
-        self.assertEqual(make_targets(text), {"verify", "source-2-1-audit"})
+        text = "verify: build\n\tpython tool.py\nsource-2-2-audit:\n"
+        self.assertEqual(make_targets(text), {"verify", "source-2-2-audit"})
+
+    def test_project_source_layout_is_complete(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        self.assertEqual(
+            validate_source_layout(
+                root, root / "config/reconstruction/source_layout.json",
+            ),
+            [],
+        )
 
     def test_layout_rejects_extra_root_entrypoint(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -77,6 +87,7 @@ class Source21AuditTests(unittest.TestCase):
                 "src_root_asm": ["main.asm"],
                 "canonical_source": "src/main.asm",
                 "revision_ids": "src/main.asm",
+                "source_layout_registry": "src/missing-layout.json",
                 "variant_entrypoints": ["src/main.asm"],
                 "linker_configs": ["src/main.asm"],
                 "tests_root": "tests",

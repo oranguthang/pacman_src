@@ -1,18 +1,19 @@
 {
   "schema_version": 2,
   "release_line": "2.x",
-  "release": {"name": "Source Reconstruction 2.1", "version": "2.1"},
+  "release": {"name": "Source Reconstruction 2.2", "version": "2.2"},
   "release_kind": "compatible_minor",
-  "tag": "source-reconstruction-2.1",
+  "tag": "source-reconstruction-2.2",
   "publish_remote": "origin",
-  "status": "tag-ready",
+  "status": "development",
   "predecessor": {
-    "tag": "source-reconstruction-2.0",
-    "commit": "ae136e1a7246f911e5280e8a7ad869b604bb9189",
-    "manifest": null,
-    "legacy_without_manifest": true
+    "tag": "source-reconstruction-2.1",
+    "commit": "1a825d3010bac2ac9c5cd8772e5352537016b526",
+    "manifest": "config/source_reconstruction_2_1.json"
   },
   "included_scope": [
+    "self_contained_release_metadata",
+    "machine_readable_source_layout",
     "resolved_reconstruction_unknowns",
     "semantic_runtime_evidence",
     "assembly_style_and_label_provenance",
@@ -26,51 +27,21 @@
     {"id": "profile_aware_authoring", "status": "not_applicable", "reason": "Authoring remains scoped to the isolated expanded build, not every official profile."},
     {"id": "sibling_engine", "status": "not_applicable", "reason": "No sibling or later engine is claimed by this repository."},
     {"id": "additional_platform_abi", "status": "not_applicable", "reason": "All accepted profiles use the same NES NROM execution ABI."},
-    {"id": "script_package_layout", "status": "planned", "reason": "A coordinated path migration is deferred to avoid churn in stable public workflows."},
+    {"id": "script_package_layout", "status": "planned", "reason": "The coordinated scripts/tests package migration is part of the Source 2.2 development plan and is not complete yet."},
     {"id": "unified_qt_studio", "status": "planned", "reason": "Existing headless models and separate tools satisfy the accepted authoring scope."}
   ],
   "delta": [
     {
-      "id": "documentation_state_refresh",
+      "id": "self_contained_release_metadata",
       "kind": "documentation",
-      "summary": "Replace obsolete milestone and gap language with the actual post-2.0 project boundary.",
-      "evidence": ["README.md", "docs/index.md", "docs/roadmap.md"]
+      "summary": "Keep the public release manifest self-contained and limited to project-owned release facts.",
+      "evidence": ["config/source_reconstruction_2_2.json", "docs/source_reconstruction_2_2.md"]
     },
     {
-      "id": "resolved_reconstruction_unknowns",
-      "kind": "evidence",
-      "summary": "Close remaining unknowns and validate semantic runtime traces.",
-      "evidence": ["docs/unknowns.md", "scenarios/reconstruction_evidence.json", "tests/test_reconstruction_evidence.py"]
-    },
-    {
-      "id": "assembly_style_and_provenance",
+      "id": "machine_readable_source_layout",
       "kind": "tooling",
-      "summary": "Enforce canonical ca65 style, label roles, contribution rules, and complete imported-label provenance.",
-      "evidence": ["docs/assembly_style.md", "docs/provenance/label_renames.json", "tests/test_label_provenance.py"]
-    },
-    {
-      "id": "canonical_symbolic_relocation",
-      "kind": "evidence",
-      "summary": "Prove canonical symbolic relocation in the emulator.",
-      "evidence": ["scripts/workflow/relocation_test.py", "tests/test_relocation.py"]
-    },
-    {
-      "id": "normalized_repository_layout",
-      "kind": "source",
-      "summary": "Normalize source, linker, variant, and test boundaries while keeping stable compatibility aliases.",
-      "evidence": ["docs/source_layout.md", "tests/test_source_2_1_audit.py"]
-    },
-    {
-      "id": "manifest_driven_revision_builds",
-      "kind": "tooling",
-      "summary": "Make the revision manifest own build metadata and preserve one shared source entrypoint.",
-      "evidence": ["config/revisions.json", "scripts/build_revision.py", "tests/test_revision_matrix.py"]
-    },
-    {
-      "id": "pinned_toolchain_and_profile_runtime",
-      "kind": "tooling",
-      "summary": "Pin every executable used by the gate and directly boot all seven official revision profiles.",
-      "evidence": ["config/toolchain.json", "scenarios/revision_smoke.json", "tests/test_build_dev.py", "tests/test_revision_smokes.py"]
+      "summary": "Give every canonical PRG range one machine-readable semantic owner and validate contiguous ownership against the source entrypoint.",
+      "evidence": ["config/reconstruction/source_layout.json", "tests/test_source_2_2_audit.py"]
     }
   ],
   "requirements": {
@@ -102,13 +73,22 @@
       "status": "satisfied",
       "evidence": {"targets": ["build-dev"], "files": ["config/toolchain.json"], "scenarios": [], "artifacts": []}
     },
-    "release_integrity": {
+    "public_release_metadata": {
       "status": "satisfied",
-      "evidence": {"targets": ["source-2-1-check", "source-2-1-post-tag-audit"], "files": ["config/source_reconstruction_2_1.json", "docs/source_reconstruction_2_1.md"], "scenarios": [], "artifacts": []}
+      "evidence": {"targets": ["source-2-2-audit"], "files": ["config/source_reconstruction_2_2.json", "docs/source_reconstruction_2_2.md"], "scenarios": [], "artifacts": []}
+    },
+    "source_layout_ownership": {
+      "status": "satisfied",
+      "evidence": {"targets": ["source-2-2-audit"], "files": ["config/reconstruction/source_layout.json", "src/main.asm"], "scenarios": [], "artifacts": []}
+    },
+    "release_integrity": {
+      "status": "planned",
+      "evidence": {"targets": ["source-2-2-check", "source-2-2-post-tag-audit"], "files": ["config/source_reconstruction_2_2.json", "docs/source_reconstruction_2_2.md"], "scenarios": [], "artifacts": []}
     }
   },
   "layout": {
     "canonical_source": "src/main.asm",
+    "source_layout_registry": "config/reconstruction/source_layout.json",
     "src_root_asm": ["main.asm"],
     "variant_entrypoints": ["src/expanded/nrom256.asm", "src/variants/stage5.asm"],
     "revision_ids": "src/revisions/profile_ids.inc",
@@ -120,7 +100,8 @@
       "tests/test_relocation.py",
       "tests/test_revision_matrix.py",
       "tests/test_revision_smokes.py",
-      "tests/test_source_2_1_audit.py"
+      "tests/test_source_2_1_audit.py",
+      "tests/test_source_2_2_audit.py"
     ]
   },
   "layout_deviations": [
@@ -189,28 +170,33 @@
     "private_inputs_tracked": false
   },
   "aggregate_gates": {
-    "pre_tag": ["make source-2-1-check"],
-    "post_tag": ["make source-2-1-post-tag-audit"]
+    "pre_tag": ["make source-2-2-check"],
+    "post_tag": ["make source-2-2-post-tag-audit"]
   },
   "required_files": [
+    "config/reconstruction/source_layout.json",
     "docs/index.md",
     "docs/adr/0001-expanded-nrom256.md",
     "docs/licensing.md",
     "docs/source_reconstruction_1_0.md",
     "docs/source_reconstruction_2_0.md",
     "docs/source_reconstruction_2_1.md",
+    "docs/source_reconstruction_2_2.md",
     "docs/source_layout.md",
     "docs/multi_revision_builds.md",
     "scripts/build_dev.py",
     "scripts/build_revision.py",
     "scripts/revision_profiles.py",
-    "scripts/source_2_1_audit.py"
+    "scripts/source_2_1_audit.py",
+    "scripts/source_2_2_audit.py"
   ],
   "required_make_targets": [
     "verify", "verify-revision", "verify-revisions", "smoke-revisions",
     "verify-hack", "validate-hack", "verify-expanded", "validate-expanded",
     "test-relocation", "reconstruction-audit", "reconstruction-audit-2",
     "source-2-1-audit", "source-2-1-release-audit",
-    "source-2-1-post-tag-audit", "source-2-1-check"
+    "source-2-1-post-tag-audit", "source-2-1-check",
+    "source-2-2-audit", "source-2-2-release-audit",
+    "source-2-2-post-tag-audit", "source-2-2-check"
   ]
 }

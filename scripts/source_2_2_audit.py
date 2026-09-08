@@ -14,15 +14,16 @@ from workflow.run_revision_smokes import validate_scenarios
 
 
 EXPECTED_RELEASE_LINE = "2.x"
-EXPECTED_RELEASE = {"name": "Source Reconstruction 2.1", "version": "2.1"}
-EXPECTED_TAG = "source-reconstruction-2.1"
+EXPECTED_RELEASE = {"name": "Source Reconstruction 2.2", "version": "2.2"}
+EXPECTED_TAG = "source-reconstruction-2.2"
 EXPECTED_PREDECESSOR = {
-    "tag": "source-reconstruction-2.0",
-    "commit": "ae136e1a7246f911e5280e8a7ad869b604bb9189",
-    "manifest": None,
-    "legacy_without_manifest": True,
+    "tag": "source-reconstruction-2.1",
+    "commit": "1a825d3010bac2ac9c5cd8772e5352537016b526",
+    "manifest": "config/source_reconstruction_2_1.json",
 }
 EXPECTED_SCOPE = (
+    "self_contained_release_metadata",
+    "machine_readable_source_layout",
     "resolved_reconstruction_unknowns",
     "semantic_runtime_evidence",
     "assembly_style_and_label_provenance",
@@ -39,6 +40,8 @@ EXPECTED_REQUIREMENTS = {
     "isolated_authoring_and_variants",
     "canonical_relocation",
     "reproducible_toolchain",
+    "public_release_metadata",
+    "source_layout_ownership",
     "release_integrity",
 }
 EXPECTED_LICENSE_CATEGORIES = {
@@ -92,17 +95,17 @@ def remote_tag_exists(project_root: Path, remote: str, tag: str) -> bool:
 def validate_release_metadata(manifest: dict[str, object]) -> list[str]:
     errors: list[str] = []
     if manifest.get("release_line") != EXPECTED_RELEASE_LINE:
-        errors.append("release line differs from Source 2.1")
+        errors.append("release line differs from Source 2.2")
     if manifest.get("release") != EXPECTED_RELEASE:
-        errors.append("release identity differs from Source 2.1")
+        errors.append("release identity differs from Source 2.2")
     if manifest.get("release_kind") != "compatible_minor":
-        errors.append("Source 2.1 must declare a compatible_minor release")
+        errors.append("Source 2.2 must declare a compatible_minor release")
     if manifest.get("tag") != EXPECTED_TAG:
-        errors.append("release tag differs from Source 2.1")
+        errors.append("release tag differs from Source 2.2")
     if manifest.get("predecessor") != EXPECTED_PREDECESSOR:
-        errors.append("predecessor identity differs from Source 2.0")
+        errors.append("predecessor identity differs from Source 2.1")
     if manifest.get("included_scope") != list(EXPECTED_SCOPE):
-        errors.append("included scope or order differs from Source 2.1")
+        errors.append("included scope or order differs from Source 2.2")
     delta = manifest.get("delta")
     if not isinstance(delta, list) or not delta:
         errors.append("release delta must contain evidence-backed entries")
@@ -130,6 +133,117 @@ def validate_release_metadata(manifest: dict[str, object]) -> list[str]:
     return errors
 
 
+def parse_address(value: object, field: str) -> int:
+    if not isinstance(value, str) or not re.fullmatch(r"0x[0-9A-Fa-f]{4}", value):
+        raise ValueError(f"invalid {field}: {value!r}")
+    return int(value, 16)
+
+
+def validate_source_layout(project_root: Path, path: Path) -> list[str]:
+    try:
+        document = read_json(path)
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        return [f"invalid source-layout registry: {error}"]
+    if not isinstance(document, dict) or document.get("schema_version") != 1:
+        return ["unsupported source-layout registry schema"]
+    errors: list[str] = []
+    try:
+        window = document["cpu_window"]
+        if not isinstance(window, dict):
+            raise ValueError("cpu_window must be an object")
+        cursor = parse_address(window.get("start"), "CPU window start")
+        window_end = parse_address(window.get("end"), "CPU window end")
+    except (KeyError, ValueError) as error:
+        return [str(error)]
+    modules = document.get("modules")
+    if not isinstance(modules, list) or not modules:
+        return ["source-layout registry has no modules"]
+    paths: list[str] = []
+    for expected_order, row in enumerate(modules, 1):
+        if not isinstance(row, dict):
+            errors.append(f"source-layout row {expected_order} is not an object")
+            continue
+        module_path = row.get("path")
+        if row.get("order") != expected_order:
+            errors.append(f"source-layout order mismatch at row {expected_order}")
+        if not isinstance(module_path, str) or not module_path.startswith("src/"):
+            errors.append(f"invalid source-layout path at row {expected_order}")
+            continue
+        paths.append(module_path)
+        source_path = project_root / module_path
+        if not source_path.is_file():
+            errors.append(f"missing source-layout module: {module_path}")
+        if not isinstance(row.get("responsibility"), str) or not row["responsibility"]:
+            errors.append(f"source-layout module lacks responsibility: {module_path}")
+        if row.get("kind") not in {
+            "semantic-code", "owned-data", "generated-data-wrapper", "fixed-tail",
+        }:
+            errors.append(f"invalid source-layout kind: {module_path}")
+        try:
+            start = parse_address(row.get("start"), f"start for {module_path}")
+            end = parse_address(row.get("end"), f"end for {module_path}")
+        except ValueError as error:
+            errors.append(str(error))
+            continue
+        if start != cursor:
+            errors.append(
+                f"source-layout gap or overlap before {module_path}: "
+                f"expected 0x{cursor:04X}, got 0x{start:04X}"
+            )
+        if end < start:
+            errors.append(f"source-layout range is reversed: {module_path}")
+        cursor = end + 1
+        if source_path.is_file():
+            line_count = len(source_path.read_text(encoding="utf-8").splitlines())
+            exception = row.get("size_exception")
+            if (line_count < 25 or line_count > 900) and not isinstance(exception, dict):
+                errors.append(
+                    f"source-layout size exception is required for {module_path}: "
+                    f"{line_count} lines"
+                )
+            if isinstance(exception, dict) and not all(
+                isinstance(exception.get(key), str) and exception[key]
+                for key in ("kind", "reason")
+            ):
+                errors.append(f"invalid source-layout size exception: {module_path}")
+    if len(paths) != len(set(paths)):
+        errors.append("source-layout module paths are not unique")
+    if cursor != window_end + 1:
+        errors.append(
+            f"source-layout ends at 0x{cursor - 1:04X}, expected 0x{window_end:04X}"
+        )
+    entrypoint = project_root / str(document.get("canonical_entrypoint", ""))
+    if not entrypoint.is_file():
+        errors.append("source-layout canonical entrypoint is missing")
+        return errors
+    includes = re.findall(
+        r'^\s*\.include\s+"([^"]+)"',
+        entrypoint.read_text(encoding="utf-8"),
+        re.MULTILINE,
+    )
+    relative_modules = [value.removeprefix("src/") for value in paths]
+    actual_modules = [value for value in includes if value in set(relative_modules)]
+    if actual_modules != relative_modules:
+        errors.append("source-layout module order differs from canonical entrypoint")
+    non_emitting = document.get("non_emitting_includes")
+    if not isinstance(non_emitting, list) or not all(
+        isinstance(value, str) and (project_root / value).is_file()
+        for value in non_emitting
+    ):
+        errors.append("source-layout non-emitting include list is invalid")
+    else:
+        expected_non_emitting = [value.removeprefix("src/") for value in non_emitting]
+        actual_non_emitting = [value for value in includes if value not in set(relative_modules)]
+        if actual_non_emitting != expected_non_emitting:
+            errors.append("non-emitting include order differs from canonical entrypoint")
+    variants = document.get("variant_entrypoints")
+    if not isinstance(variants, list) or not all(
+        isinstance(value, str) and (project_root / value).is_file() for value in variants
+    ):
+        errors.append("source-layout variant entrypoints are invalid")
+    return errors
+
+
 def validate_layout(project_root: Path, contract: object) -> list[str]:
     if not isinstance(contract, dict):
         return ["layout contract must be an object"]
@@ -140,10 +254,13 @@ def validate_layout(project_root: Path, contract: object) -> list[str]:
         errors.append(f"src root ASM files are {actual_root}, expected {expected_root}")
     if list((project_root / "src").glob("*.cfg")):
         errors.append("linker configs must not remain in src root")
-    for key in ("canonical_source", "revision_ids"):
+    for key in ("canonical_source", "revision_ids", "source_layout_registry"):
         value = contract.get(key)
         if not isinstance(value, str) or not (project_root / value).is_file():
             errors.append(f"missing layout path: {value}")
+    registry = contract.get("source_layout_registry")
+    if isinstance(registry, str):
+        errors.extend(validate_source_layout(project_root, project_root / registry))
     for key in ("variant_entrypoints", "linker_configs", "required_test_modules"):
         values = contract.get(key)
         if not isinstance(values, list) or not values or not all(
@@ -175,11 +292,11 @@ def validate_revision_contract(
     except (OSError, ValueError, json.JSONDecodeError) as error:
         return [f"invalid revision manifest: {error}"], []
     if not isinstance(document, dict) or document.get("format") != contract.get("schema_format"):
-        errors.append("revision manifest format differs from Source 2.1 contract")
+        errors.append("revision manifest format differs from Source 2.2 contract")
     if [revision.profile_id for revision in revisions] != contract.get("profile_ids"):
-        errors.append("revision profile IDs or order differ from Source 2.1 contract")
+        errors.append("revision profile IDs or order differ from Source 2.2 contract")
     if [revision.ca65_revision for revision in revisions] != contract.get("ca65_revisions"):
-        errors.append("ca65 revision IDs or order differ from Source 2.1 contract")
+        errors.append("ca65 revision IDs or order differ from Source 2.2 contract")
     return errors, revisions
 
 
@@ -291,13 +408,21 @@ def validate_delta_evidence(project_root: Path, delta: object) -> list[str]:
 
 def validate_requirements(
     project_root: Path, contract: object, targets: set[str], artifact_ids: set[str],
+    require_ready: bool,
 ) -> list[str]:
     if not isinstance(contract, dict) or set(contract) != EXPECTED_REQUIREMENTS:
-        return ["requirement IDs differ from the Source 2.1 contract"]
+        return ["requirement IDs differ from the Source 2.2 contract"]
     errors: list[str] = []
     for requirement_id, requirement in contract.items():
-        if not isinstance(requirement, dict) or requirement.get("status") != "satisfied":
-            errors.append(f"requirement is not satisfied: {requirement_id}")
+        if not isinstance(requirement, dict):
+            errors.append(f"requirement is invalid: {requirement_id}")
+            continue
+        status = requirement.get("status")
+        allowed = {"satisfied"} if require_ready else {
+            "satisfied", "partial", "unsupported", "planned",
+        }
+        if status not in allowed:
+            errors.append(f"requirement has invalid status: {requirement_id}")
             continue
         evidence = requirement.get("evidence")
         if not isinstance(evidence, dict):
@@ -447,7 +572,7 @@ def validate_repository_state(
             errors.append("tag-ready audit requires a clean worktree")
         subject = git_output(project_root, "show", "-s", "--format=%s", "HEAD")
         body = git_output(project_root, "show", "-s", "--format=%b", "HEAD")
-        if subject != "Complete Source Reconstruction 2.1":
+        if subject != "Complete Source Reconstruction 2.2":
             errors.append("release commit title differs from the contract")
         paragraphs = [
             paragraph for paragraph in re.split(r"\r?\n\s*\r?\n", body)
@@ -457,22 +582,22 @@ def validate_repository_state(
             errors.append("release commit body must contain two or three paragraphs")
         if "Co-Authored-By: Codex <noreply@openai.com>" not in body:
             errors.append("release commit lacks the required Codex attribution")
-        if not all(term in body for term in ("source-2-1-check", "excluded", "manifest")):
+        if not all(term in body for term in ("source-2-2-check", "excluded", "manifest")):
             errors.append("release commit body lacks delta, gate, or scope evidence")
         if verify_tag:
             if git_output(project_root, "cat-file", "-t", EXPECTED_TAG) != "tag":
-                errors.append("Source 2.1 tag must be annotated")
+                errors.append("Source 2.2 tag must be annotated")
             tag_commit = git_output(project_root, "rev-list", "-n", "1", EXPECTED_TAG)
             head = git_output(project_root, "rev-parse", "HEAD")
             if tag_commit != head:
-                errors.append("Source 2.1 tag does not resolve to HEAD")
+                errors.append("Source 2.2 tag does not resolve to HEAD")
         else:
             if git_ref_exists(project_root, f"refs/tags/{EXPECTED_TAG}"):
-                errors.append("future Source 2.1 tag already exists locally")
+                errors.append("future Source 2.2 tag already exists locally")
             if not isinstance(publish_remote, str) or not publish_remote:
                 errors.append("release manifest lacks a publish remote")
             elif remote_tag_exists(project_root, publish_remote, EXPECTED_TAG):
-                errors.append("future Source 2.1 tag already exists on publish remote")
+                errors.append("future Source 2.2 tag already exists on publish remote")
     except ValueError as error:
         errors.append(str(error))
     return errors
@@ -482,12 +607,12 @@ def audit(
     project_root: Path, manifest: object, require_ready: bool, verify_tag: bool = False,
 ) -> list[str]:
     if not isinstance(manifest, dict) or manifest.get("schema_version") != 2:
-        return ["unsupported Source 2.1 manifest schema"]
+        return ["unsupported Source 2.2 manifest schema"]
     errors = validate_release_metadata(manifest)
     if require_ready and manifest.get("status") != "tag-ready":
-        errors.append("Source 2.1 manifest is not tag-ready")
+        errors.append("Source 2.2 manifest is not tag-ready")
     elif manifest.get("status") not in {"development", "tag-ready"}:
-        errors.append("unsupported Source 2.1 release status")
+        errors.append("unsupported Source 2.2 release status")
     errors.extend(validate_delta_evidence(project_root, manifest.get("delta")))
     errors.extend(validate_paths(project_root, manifest.get("required_files"), "required_files"))
     try:
@@ -520,6 +645,7 @@ def audit(
     } if isinstance(artifacts, list) else set()
     errors.extend(validate_requirements(
         project_root, manifest.get("requirements"), targets, artifact_ids,
+        require_ready,
     ))
     errors.extend(validate_layout_deviations(manifest.get("layout_deviations")))
     errors.extend(validate_toolchain(project_root, manifest.get("toolchain")))
@@ -527,10 +653,10 @@ def audit(
         project_root, manifest.get("licensing"), manifest.get("provenance"),
     ))
     if manifest.get("aggregate_gates") != {
-        "pre_tag": ["make source-2-1-check"],
-        "post_tag": ["make source-2-1-post-tag-audit"],
+        "pre_tag": ["make source-2-2-check"],
+        "post_tag": ["make source-2-2-post-tag-audit"],
     }:
-        errors.append("aggregate pre-tag or post-tag gate differs from Source 2.1")
+        errors.append("aggregate pre-tag or post-tag gate differs from Source 2.2")
     if require_ready:
         errors.extend(validate_repository_state(
             project_root, verify_tag, manifest.get("publish_remote"),
@@ -541,7 +667,7 @@ def audit(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Audit the Pac-Man Source 2.1 contract.")
+    parser = argparse.ArgumentParser(description="Audit the Pac-Man Source 2.2 contract.")
     parser.add_argument("--project-root", type=Path, required=True)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--require-ready", action="store_true")
